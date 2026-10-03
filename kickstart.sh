@@ -5,6 +5,7 @@ set -euo pipefail
 readonly dotfiles_remote="git@github.com:AnudeepChPaul/terminal-setup.git"
 readonly dotfiles_git_dir="$HOME/.cfg"
 readonly mise_key_fingerprint="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+readonly mise_docs_url="https://raw.githubusercontent.com/jdx/mise/main/docs/installing-mise.md"
 readonly mise_bin="$HOME/.local/bin/mise"
 
 platform=""
@@ -66,6 +67,18 @@ install_prereqs() {
   esac
 }
 
+verify_mise_installer() {
+  local fingerprint="$1" work_dir="$2" gpg_status
+  rm -f "$work_dir/install.sh"
+  GNUPGHOME="$work_dir/gnupg" gpg --batch --quiet --keyserver hkps://keys.openpgp.org --recv-keys "$fingerprint" 2>/dev/null || return 1
+  gpg_status="$(GNUPGHOME="$work_dir/gnupg" gpg --batch --status-fd 1 --output "$work_dir/install.sh" --decrypt "$work_dir/install.sh.sig" 2>/dev/null)" || return 1
+  grep -q "^\[GNUPG:\] VALIDSIG $fingerprint " <<<"$gpg_status"
+}
+
+fetch_mise_fingerprint() {
+  curl -fsSL --retry 3 --retry-all-errors --max-time 20 "$mise_docs_url" 2>/dev/null | grep -oE -- '--recv-keys [0-9A-F]{40}' | head -1 | awk '{print $2}' || true
+}
+
 install_mise_verified() {
   if [ -x "$mise_bin" ]; then
     log "mise already installed: $("$mise_bin" --version)"
@@ -74,16 +87,17 @@ install_mise_verified() {
   log "installing mise (gpg verified)"
   local work_dir
   work_dir="$(mktemp -d)"
-  export GNUPGHOME="$work_dir/gnupg"
-  mkdir -m 700 "$GNUPGHOME"
-  gpg --batch --keyserver hkps://keys.openpgp.org --recv-keys "$mise_key_fingerprint"
+  mkdir -m 700 "$work_dir/gnupg"
   curl -fsSL -o "$work_dir/install.sh.sig" https://mise.jdx.dev/install.sh.sig
-  local gpg_status
-  gpg_status="$(gpg --batch --status-fd 1 --output "$work_dir/install.sh" --decrypt "$work_dir/install.sh.sig" 2>/dev/null)" \
-    || die "mise installer signature verification failed"
-  grep -q "^\[GNUPG:\] VALIDSIG $mise_key_fingerprint " <<<"$gpg_status" \
-    || die "mise installer not signed by $mise_key_fingerprint"
-  unset GNUPGHOME
+  if ! verify_mise_installer "$mise_key_fingerprint" "$work_dir"; then
+    local fresh_fingerprint
+    fresh_fingerprint="$(fetch_mise_fingerprint)"
+    [ -n "$fresh_fingerprint" ] && [ "$fresh_fingerprint" != "$mise_key_fingerprint" ] \
+      || die "mise installer not signed by $mise_key_fingerprint and no new key found"
+    log "mise signing key changed: $fresh_fingerprint"
+    verify_mise_installer "$fresh_fingerprint" "$work_dir" \
+      || die "mise installer not signed by $fresh_fingerprint either"
+  fi
   sh "$work_dir/install.sh"
   rm -rf "$work_dir"
 }
