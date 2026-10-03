@@ -166,15 +166,24 @@ setup_signing() {
     fi
   fi
   local local_git_config="$HOME/.config/git/config.local"
-  if [ ! -f "$local_git_config" ]; then
-    local git_name git_email
-    read -r -p "git user.name: " git_name </dev/tty
-    read -r -p "git user.email: " git_email </dev/tty
-    mkdir -p "$(dirname "$local_git_config")"
-    git config --file "$local_git_config" user.name "$git_name"
-    git config --file "$local_git_config" user.email "$git_email"
-    git config --file "$local_git_config" user.signingkey "$ssh_public_key"
+  local git_name git_email git_signing_key
+  git_name="$(git config --global --includes user.name || true)"
+  git_email="$(git config --global --includes user.email || true)"
+  git_signing_key="$(git config --global --includes user.signingkey || true)"
+  if [ -n "$git_name" ] && [ -n "$git_email" ] && [ -n "$git_signing_key" ]; then
+    log "git identity already configured"
+    return
   fi
+  mkdir -p "$(dirname "$local_git_config")"
+  if [ -z "$git_name" ]; then
+    read -r -p "git user.name: " git_name </dev/tty
+    git config --file "$local_git_config" user.name "$git_name"
+  fi
+  if [ -z "$git_email" ]; then
+    read -r -p "git user.email: " git_email </dev/tty
+    git config --file "$local_git_config" user.email "$git_email"
+  fi
+  [ -n "$git_signing_key" ] || git config --file "$local_git_config" user.signingkey "$ssh_public_key"
 }
 
 dotfiles_git() { git --git-dir="$dotfiles_git_dir" --work-tree="$HOME" "$@"; }
